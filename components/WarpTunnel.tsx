@@ -7,34 +7,45 @@ interface CrystalUniverseProps {
   getAudioData: () => AudioData;
 }
 
-const COUNT = 8000; // Dense particles for "Perfect" look
-const TUNNEL_LENGTH = 300; // Long tunnel for depth
-const TUNNEL_RADIUS = 15; // Wide enough to fly through
+// 3 Distinct Visual Modes
+enum TunnelMode {
+  COSMIC_WARP = 0,   // Fast, straight, blue/purple, aligned
+  DIAMOND_CAVE = 1,  // Chaotic rotation, white/rainbow, sharp angles
+  PRISM_STREAM = 2   // Wavy, saturated colors, flowing
+}
+
+const COUNT = 10000; // Maximum density for "Perfect" look
+const TUNNEL_LENGTH = 400; 
+const TUNNEL_RADIUS = 20;
 
 export const CrystalUniverse: React.FC<CrystalUniverseProps> = ({ getAudioData }) => {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   
+  // Reusable objects for GC optimization
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const color = useMemo(() => new THREE.Color(), []);
-  const mousePos = useMemo(() => new THREE.Vector3(), []);
+  const mousePos = useMemo(() => new THREE.Vector3(), []); // Smooth mouse
+  const targetMouse = useMemo(() => new THREE.Vector3(), []); // Raw mouse input
 
   // Initialize Particles
   const particles = useMemo(() => {
     return new Array(COUNT).fill(0).map((_, i) => {
-      // Cylindrical tunnel distribution
-      const theta = Math.random() * Math.PI * 2;
-      const r = TUNNEL_RADIUS * (0.3 + Math.random() * 0.7); // Hollow center
-      const z = Math.random() * TUNNEL_LENGTH - (TUNNEL_LENGTH / 2);
+      const angle = Math.random() * Math.PI * 2;
+      const radiusOffset = Math.random();
       
       return {
-        // Base coordinates relative to tunnel center
-        theta,
-        r,
-        z, // Current Z position
-        speedSpeed: 0.5 + Math.random() * 1.0, // Parallax effect
+        // Base coordinate system
+        angle,
+        radiusBase: TUNNEL_RADIUS * (0.4 + radiusOffset * 1.5), // Multi-layered tunnel
+        z: Math.random() * TUNNEL_LENGTH - TUNNEL_LENGTH / 2,
+        
+        // Physics attributes
+        speedOffset: 0.5 + Math.random() * 1.5,
+        rotationSpeed: (Math.random() - 0.5) * 2,
+        
+        // Aesthetic attributes
         id: i,
-        // For Stained Glass color patterns
-        noiseOffset: Math.random() * 100
+        randomColor: Math.random(),
       };
     });
   }, []);
@@ -42,96 +53,124 @@ export const CrystalUniverse: React.FC<CrystalUniverseProps> = ({ getAudioData }
   useFrame((state) => {
     if (!meshRef.current) return;
 
-    // --- INPUTS ---
+    // --- 1. SENSORY INPUTS ---
     const time = state.clock.elapsedTime;
     const { getAverage } = getAudioData();
-    const bass = getAverage(0, 10) / 255;
-    const mids = getAverage(10, 100) / 255;
-    const highs = getAverage(100, 200) / 255;
-    const volume = Math.min((bass + mids + highs) / 3 * 2, 1);
+    const bass = getAverage(0, 10) / 255;       // Scale / Boom
+    const mids = getAverage(10, 100) / 255;     // Distortion
+    const highs = getAverage(100, 200) / 255;   // Sparkle / brightness
 
-    // --- MOUSE ---
-    // Smoothly interpolate mouse position for fluid camera feel
-    mousePos.x += (state.pointer.x * 5 - mousePos.x) * 0.05;
-    mousePos.y += (state.pointer.y * 5 - mousePos.y) * 0.05;
+    // --- 2. DYNAMIC FLIGHT CONTROL (Mouse Physics) ---
+    // Smoothly interpolate mouse for "weighty" flight feel
+    targetMouse.set((state.pointer.x * 30), (state.pointer.y * 30), 0);
+    mousePos.lerp(targetMouse, 0.05); // Ease factor
 
-    // --- INTRO IMPACT LOGIC ---
-    // First 4 seconds: WARP SPEED
-    const introDuration = 4.0;
-    const isIntro = time < introDuration;
-    // Speed curve: Starts insane, slows down to cruise
-    const baseSpeed = isIntro 
-      ? 150 * (1 - time / introDuration) + 20 
-      : 20 + bass * 30;
+    // Camera Bank/Roll effect based on horizontal movement
+    // We rotate the camera slightly to simulate banking into a turn
+    state.camera.rotation.z = THREE.MathUtils.lerp(state.camera.rotation.z, -state.pointer.x * 0.2, 0.05);
+    // Slight FOV change based on speed/bass
+    state.camera.fov = THREE.MathUtils.lerp(state.camera.fov, 90 + bass * 10, 0.1);
+    state.camera.updateProjectionMatrix();
 
-    // Camera Rotation based on Mouse (Flight simulator feel)
-    // Rotate the entire mesh container or offset particles? Offset particles is cheaper usually.
-    // Actually, let's just move the camera slightly in the SceneContainer, 
-    // but here we distort the tunnel based on mouse.
+    // --- 3. MODE SWITCHING ---
+    const cycleDuration = 20; // Seconds per mode
+    const modeIndex = Math.floor(time / cycleDuration) % 3;
+    const currentMode = modeIndex as TunnelMode;
 
+    // --- 4. PARTICLE LOOP ---
     for (let i = 0; i < COUNT; i++) {
       const p = particles[i];
 
-      // 1. INFINITE SCROLL Z
-      // Move particles towards positive Z (camera looks down -Z effectively)
-      p.z += baseSpeed * p.speedSpeed * 0.016; 
+      // -- Z-Movement (Infinite Tunnel) --
+      // Base speed varies by mode
+      let speed = 20; 
+      if (currentMode === TunnelMode.COSMIC_WARP) speed = 60 + bass * 50;
+      if (currentMode === TunnelMode.DIAMOND_CAVE) speed = 15 + bass * 10;
+      if (currentMode === TunnelMode.PRISM_STREAM) speed = 30 + mids * 30;
+
+      p.z += speed * p.speedOffset * 0.016; 
       if (p.z > TUNNEL_LENGTH / 2) {
         p.z -= TUNNEL_LENGTH;
       }
 
-      // 2. CALCULATE POSITION
-      let r = p.r;
-      // Audio reactivity: Tunnel breathes/expands with bass
-      r += Math.sin(p.z * 0.1 + time * 2) * bass * 2;
+      // -- Tunnel Shaping (The "Snake" Effect) --
+      // We bend the tunnel based on mouse position to simulate turning
+      // The further away (z), the more the tunnel bends towards the mouse
+      const zFactor = (p.z + TUNNEL_LENGTH/2) / TUNNEL_LENGTH; // 0 to 1
       
-      // Tunnel curvature (snake effect)
-      const curveX = Math.sin(time * 0.5 + p.z * 0.02) * 5;
-      const curveY = Math.cos(time * 0.3 + p.z * 0.02) * 5;
+      // Calculate curve offset
+      const curveX = Math.sin(time * 0.5 + p.z * 0.01) * 5 + (mousePos.x * zFactor * 2);
+      const curveY = Math.cos(time * 0.3 + p.z * 0.01) * 5 + (mousePos.y * zFactor * 2);
 
-      const x = curveX + Math.cos(p.theta) * r;
-      const y = curveY + Math.sin(p.theta) * r;
+      // Base Position
+      let r = p.radiusBase;
+      // Audio-reactive expansion
+      r += bass * 5 * Math.sin(p.z * 0.1 + time * 3);
+
+      const x = curveX + Math.cos(p.angle) * r;
+      const y = curveY + Math.sin(p.angle) * r;
       const z = p.z;
 
-      // Interaction: Mouse repels/attracts slightly
-      const dx = x - mousePos.x;
-      const dy = y - mousePos.y;
-      // const dist = Math.sqrt(dx*dx + dy*dy);
-      // const force = Math.max(0, 5 - dist) / 5;
-      
-      dummy.position.set(
-        x + dx * -0.1, // Slight parallax follow
-        y + dy * -0.1, 
-        z
-      );
+      dummy.position.set(x, y, z);
 
-      // 3. ROTATION (Align with Z axis for speed streaks)
-      dummy.rotation.x = Math.PI / 2; // Point along Z
+      // -- MODE SPECIFIC STYLING --
       
-      // 4. SCALE (Stretch on speed)
-      const stretch = isIntro ? 10 : 1 + bass * 5 + volume * 2;
-      dummy.scale.set(1, stretch, 1); // Stretch Y in local space (which is Z in world due to rotation)
+      if (currentMode === TunnelMode.COSMIC_WARP) {
+        // [COSMIC]: Aligned with Z, streaky, Blue/Purple
+        dummy.rotation.x = Math.PI / 2; // Point forward
+        dummy.rotation.z = p.angle;
+        dummy.rotation.y = 0;
+        
+        dummy.scale.set(1, 10 + bass * 20, 1); // Long streaks
 
-      // 5. COLOR (Stained Glass / Crystal)
-      if (isIntro) {
-         // Blinding white/cyan intro
-         const brightness = 0.5 + Math.random() * 0.5;
-         color.setHSL(0.6, 0.8, brightness); 
+        // Deep Space Colors
+        const hue = 0.6 + Math.sin(p.z * 0.05 + time) * 0.15; // Blue-ish
+        color.setHSL(hue, 0.9, 0.4 + highs * 0.6);
+
+      } else if (currentMode === TunnelMode.DIAMOND_CAVE) {
+        // [DIAMOND]: Chaotic rotation, Shards, White/Cyan/Rainbow
+        dummy.rotation.x = time * p.rotationSpeed;
+        dummy.rotation.y = time * p.rotationSpeed;
+        dummy.rotation.z = time * p.rotationSpeed;
+        
+        const scale = 1 + bass * 3;
+        dummy.scale.set(scale, scale * 4, scale); // Shards
+
+        // Diamond Colors: Mostly white/cyan, occasional rainbow flash
+        const sparkle = Math.random() < (0.02 + highs * 0.1); 
+        if (sparkle) {
+            color.setHSL(Math.random(), 1, 0.9); // Rainbow flash
+        } else {
+            // Icy White/Blue
+            color.setHSL(0.55, 0.4, 0.1 + bass * 0.4 + highs * 0.5);
+        }
+
       } else {
-         // Complex Stained Glass Gradients
-         // Use spatial coordinates to create patches of color
-         const hueNoise = Math.sin(p.theta * 3 + p.z * 0.05 + time * 0.2);
-         const hueBase = (time * 0.05) % 1; // Slowly shifting base hue
-         
-         const h = hueBase + hueNoise * 0.1; 
-         const s = 0.8 + highs * 0.2;
-         const l = 0.4 + highs * 0.6 + volume * 0.2;
+        // [PRISM STREAM]: Wave alignment, Saturated Gradients
+        dummy.lookAt(state.camera.position); // Billboarding for soft look
+        dummy.scale.set(2, 2, 2);
 
-         color.setHSL(h, s, l);
-         
-         // Sparkle effect
-         if (Math.random() < 0.01 * highs) {
-            color.setHSL(Math.random(), 1, 1);
-         }
+        // Gradient Colors based on angle and time
+        const hue = (p.angle / (Math.PI*2) + time * 0.1 + p.z * 0.01) % 1;
+        color.setHSL(hue, 1.0, 0.5 + mids * 0.5);
+      }
+
+      // -- INTERACTIVE "FORCE FIELD" --
+      // If cursor is close to particle (in XY plane primarily), repel or light up
+      // Project particle to screen space roughly
+      const dx = (x - mousePos.x * 0.2); // Adjust for parallax
+      const dy = (y - mousePos.y * 0.2);
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      
+      if (dist < 8) {
+          // Mouse interaction effect
+          const force = (8 - dist) / 8;
+          dummy.scale.multiplyScalar(1 + force * 2); // Grow
+          color.setHSL(Math.random(), 1, 0.8); // Turn into pure light
+          
+          // Slight repulsion
+          dummy.position.x += dx * force * 0.5;
+          dummy.position.y += dy * force * 0.5;
       }
 
       dummy.updateMatrix();
@@ -145,8 +184,12 @@ export const CrystalUniverse: React.FC<CrystalUniverseProps> = ({ getAudioData }
 
   return (
     <instancedMesh ref={meshRef} args={[undefined, undefined, COUNT]}>
-      {/* Extremely thin cylinder for delicate "fiber optic" look */}
-      <cylinderGeometry args={[0.02, 0.02, 1.5, 5]} />
+      {/* 
+         Cylinder Geometry:
+         Using 4 radial segments makes it a "Crystal Prism" shape (Diamond-like cross section)
+         instead of a smooth cylinder.
+      */}
+      <cylinderGeometry args={[0.05, 0.05, 2.0, 4]} />
       <meshBasicMaterial toneMapped={false} transparent opacity={0.8} />
     </instancedMesh>
   );

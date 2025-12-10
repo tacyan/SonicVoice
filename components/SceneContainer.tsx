@@ -13,7 +13,7 @@ interface SceneContainerProps {
 export const SceneContainer: React.FC<SceneContainerProps> = ({ getAudioData }) => {
   return (
     <Canvas
-      camera={{ position: [0, 0, 10], fov: 90 }} // High FOV for speed sensation, camera inside tunnel
+      camera={{ position: [0, 0, 5], fov: 90 }} // Closer camera for "Cockpit" feel
       gl={{ 
         antialias: false, 
         powerPreference: "high-performance",
@@ -22,48 +22,56 @@ export const SceneContainer: React.FC<SceneContainerProps> = ({ getAudioData }) 
       dpr={[1, 2]} 
     >
       <color attach="background" args={['#000000']} />
-      <fog attach="fog" args={['#000000', 0, 80]} />
+      <fog attach="fog" args={['#000000', 10, 150]} />
 
       <Suspense fallback={null}>
         <CrystalUniverse getAudioData={getAudioData} />
         
-        {/* Floor Reflection - Subtle to enhance tunnel depth */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -15, 0]}>
-          <planeGeometry args={[100, 300]} />
+        {/* Mirror Floor: Adds to the "Diamond" infinite reflection feel */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -20, 0]}>
+          <planeGeometry args={[200, 500]} />
           <MeshReflectorMaterial
-            blur={[400, 100]}
+            blur={[300, 100]}
             resolution={1024}
             mixBlur={1}
-            mixStrength={40}
-            roughness={0.4}
-            depthScale={1}
+            mixStrength={80} // High reflection for crystal look
+            roughness={0.2}
+            depthScale={1.2}
             minDepthThreshold={0.4}
             maxDepthThreshold={1.4}
             color="#050505"
-            metalness={0.8}
+            metalness={0.9}
             mirror={1} 
           />
         </mesh>
         
-        <Stars radius={100} depth={50} count={2000} factor={4} saturation={0} fade speed={2} />
+        {/* Subtle Ceiling reflection for full immersion */}
+        <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 20, 0]}>
+             <planeGeometry args={[200, 500]} />
+             <meshBasicMaterial color="#000" side={2} />
+        </mesh>
+
+        <Stars radius={100} depth={50} count={3000} factor={4} saturation={0} fade speed={3} />
       </Suspense>
-      
-      {/* No OrbitControls: We want to control the "Head" with mouse position in the component, purely visual ride */}
 
       <EffectComposer disableNormalPass>
-        {/* Stronger Bloom for the "Impact" */}
+        {/* 
+           Bloom: High intensity to make the "Diamond" sparkles blind slightly.
+           This is key for the "video-like" quality.
+        */}
         <Bloom 
-          luminanceThreshold={0.15} 
+          luminanceThreshold={0.1} 
           mipmapBlur 
-          intensity={1.5} 
-          radius={0.7}
+          intensity={1.8} 
+          radius={0.6}
         />
+        {/* Chromatic Aberration: Adds the prism/lens effect at edges */}
         <ChromaticAberration 
-            offset={new Vector2(0.002, 0.002)}
+            offset={new Vector2(0.003, 0.003)}
             radialModulation={true}
-            modulationOffset={0.5}
+            modulationOffset={0.3}
         />
-        <Vignette eskil={false} offset={0.1} darkness={1.2} />
+        <Vignette eskil={false} offset={0.1} darkness={1.1} />
       </EffectComposer>
     </Canvas>
   );
