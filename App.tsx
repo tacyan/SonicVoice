@@ -1,26 +1,85 @@
-import React, { useState } from 'react';
+/**
+ * App.tsx
+ * 
+ * SonicVoice アプリケーションのメインコンポーネント
+ * 
+ * 概要:
+ * - マイク入力を使用した音声反応型3Dビジュアライザー
+ * - イントロ画面とメインビジュアライゼーションの2つの状態を管理
+ * - マイクアクセスが失敗した場合はシミュレートモードで動作
+ * 
+ * 主な仕様:
+ * - ユーザーがPlay ボタンをクリックすると、マイクアクセスを要求
+ * - マイクアクセス許可後、3Dシーンが表示される
+ * - マイクがなくてもシミュレートされたデータでアニメーションが動作
+ * 
+ * 制限事項:
+ * - WebGL対応ブラウザが必要
+ */
+import React, { useState, Suspense, lazy } from 'react';
 import { useAudio } from './hooks/useAudio';
-import { SceneContainer } from './components/SceneContainer';
-import { Mic, Play, Info, Sparkles } from 'lucide-react';
+import { Mic, MicOff, Play, Sparkles } from 'lucide-react';
 
+/**
+ * 3DシーンコンポーネントのLazy読み込み
+ * 重い依存関係（@react-three/drei, three.js等）を遅延ロードすることで
+ * 初期画面の表示速度を向上させる
+ */
+const SceneContainer = lazy(() => 
+  import('./components/SceneContainer').then(module => ({ 
+    default: module.SceneContainer 
+  }))
+);
+
+/**
+ * ローディングスピナーコンポーネント
+ * 3Dシーンの読み込み中に表示される
+ */
+const LoadingSpinner: React.FC = () => (
+  <div className="absolute inset-0 flex items-center justify-center bg-black">
+    <div className="flex flex-col items-center gap-4">
+      <div className="w-12 h-12 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+      <span className="text-xs tracking-widest text-gray-400 uppercase">Loading Universe...</span>
+    </div>
+  </div>
+);
+
+/**
+ * メインアプリケーションコンポーネント
+ */
 const App: React.FC = () => {
-  const { ready, error, start, getAudioData } = useAudio();
+  const { ready, start, getAudioData, isSimulated } = useAudio();
   const [started, setStarted] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
+  /**
+   * Playボタンクリック時のハンドラー
+   * マイクアクセスを開始し、成功・失敗に関わらずビジュアライゼーションを開始する
+   */
   const handleStart = async () => {
-    await start();
-    if (!error) {
+    setIsLoading(true);
+    
+    try {
+      await start();
+      // マイクアクセスの成功・失敗に関わらず、startedをtrueにする
+      // useAudioがシミュレートモードに切り替えるため、readyは常にtrueになる
       setStarted(true);
+    } catch (e) {
+      console.error("予期しないエラー:", e);
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
-    <div className="relative w-full h-full text-white overflow-hidden bg-black select-none font-sans">
+    <div className="relative w-screen h-screen text-white overflow-hidden bg-black select-none font-sans">
       
-      {/* 3D Scene Layer */}
+      {/* 3D Scene Layer - Lazy Loaded */}
       {started && ready && (
         <div className="absolute inset-0 z-0">
-          <SceneContainer getAudioData={getAudioData} />
+          <Suspense fallback={<LoadingSpinner />}>
+            <SceneContainer getAudioData={getAudioData} />
+          </Suspense>
         </div>
       )}
 
@@ -43,18 +102,19 @@ const App: React.FC = () => {
           <div className="p-10 bg-white/5 backdrop-blur-xl rounded-full border border-white/10 shadow-[0_0_100px_rgba(0,100,255,0.2)] flex flex-col items-center gap-6">
             <button
               onClick={handleStart}
-              className="group relative flex items-center justify-center w-20 h-20 bg-white text-black rounded-full hover:scale-110 transition-transform duration-500 shadow-[0_0_50px_rgba(255,255,255,0.6)]"
+              disabled={isLoading}
+              className="group relative flex items-center justify-center w-20 h-20 bg-white text-black rounded-full hover:scale-110 transition-transform duration-500 shadow-[0_0_50px_rgba(255,255,255,0.6)] disabled:opacity-50 disabled:cursor-not-allowed"
             >
-               <Play className="w-8 h-8 ml-1 fill-current" />
+              {isLoading ? (
+                <div className="w-8 h-8 border-2 border-gray-400 border-t-black rounded-full animate-spin" />
+              ) : (
+                <Play className="w-8 h-8 ml-1 fill-current" />
+              )}
             </button>
-            <span className="text-xs tracking-widest text-gray-400 uppercase">Enter the Void</span>
+            <span className="text-xs tracking-widest text-gray-400 uppercase">
+              {isLoading ? 'Initializing...' : 'Enter the Void'}
+            </span>
           </div>
-          
-          {error && (
-             <div className="text-red-400 text-xs tracking-widest border-b border-red-500 pb-1">
-               {error}
-             </div>
-          )}
         </div>
         
         <div className="absolute bottom-10 text-[10px] text-gray-600 tracking-[0.3em] uppercase">
@@ -66,9 +126,18 @@ const App: React.FC = () => {
       {started && (
         <>
           <div className="absolute bottom-8 left-8 z-20 flex items-center gap-4 animate-fade-in">
-             <div className="flex items-center gap-2 text-xs font-mono text-blue-300 opacity-70">
-              <Mic size={12} className="animate-pulse text-white" />
-              <span>AUDIO SENSOR ACTIVE</span>
+            <div className="flex items-center gap-2 text-xs font-mono text-blue-300 opacity-70">
+              {isSimulated ? (
+                <>
+                  <MicOff size={12} className="text-yellow-400" />
+                  <span className="text-yellow-400">DEMO MODE</span>
+                </>
+              ) : (
+                <>
+                  <Mic size={12} className="animate-pulse text-white" />
+                  <span>AUDIO SENSOR ACTIVE</span>
+                </>
+              )}
             </div>
           </div>
           
