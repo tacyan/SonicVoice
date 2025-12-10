@@ -1,6 +1,6 @@
 {
-  "name": "Sonic Warp Visualizer",
-  "description": "An immersive 3D audio-reactive tunnel experience inspired by digital art installations. Uses microphone input to drive light speed and colors.",
+  "name": "Crystal Universe Experience",
+  "description": "A photorealistic recreation of an infinite LED crystal art installation. Features volumetric light rendering, mirror floors, and audio-reactive particle physics.",
   "requestFramePermissions": [
     "microphone"
   ]
